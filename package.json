@@ -1,0 +1,35 @@
+{
+  "name": "glm-delegate",
+  "version": "0.1.0",
+  "description": "Run a headless Claude Code CLI powered by GLM (Zhipu / z.ai) as an independent code-review and research delegate.",
+  "type": "module",
+  "bin": {
+    "glm-delegate": "./glm-delegate.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "glm-delegate.mjs"
+  ],
+  "keywords": [
+    "claude-code",
+    "glm",
+    "glm-5.2",
+    "zhipu",
+    "z.ai",
+    "code-review",
+    "llm",
+    "delegate",
+    "agent",
+    "model-diversity"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/requestSource/glm-delegate.git"
+  }
+}

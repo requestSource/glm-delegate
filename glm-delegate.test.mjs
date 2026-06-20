@@ -88,3 +88,23 @@ test('parseArgs collects unknown flags rather than silently passing them (fix R4
   assert.equal(p.error, undefined);
   assert.deepEqual(p.unknown, ['--bogus', 'x']);
 });
+
+// --- generate mode + --out ---
+test('parseArgs accepts generate mode and --out (space and = forms)', () => {
+  const p = parseArgs(['generate', '--out', '/tmp/x.md', '--cwd', '/repo']);
+  assert.equal(p.error, undefined);
+  assert.equal(p.mode, 'generate');
+  assert.equal(p.out, '/tmp/x.md');
+  assert.equal(p.cwd, '/repo');
+  assert.equal(parseArgs(['generate', '--out=/tmp/y.md']).out, '/tmp/y.md');
+});
+
+test('parseArgs rejects --out without a value', () => {
+  assert.ok(parseArgs(['generate', '--out']).error);
+  assert.ok(parseArgs(['generate', '--out=']).error);
+});
+
+test('parseArgs leaves out=null for review/research', () => {
+  assert.equal(parseArgs(['review']).out, null);
+  assert.equal(parseArgs(['research']).out, null);
+});

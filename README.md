@@ -1,6 +1,6 @@
 # glm-delegate
 
-Run a **headless [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI powered by GLM** (Zhipu / [z.ai](https://z.ai)) as an *independent* code-review and research delegate.
+Run a **headless [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI powered by GLM** (Zhipu / [z.ai](https://z.ai)) as an *independent* code-review, research, and generation delegate.
 
 The idea: keep Claude (Opus/Sonnet) as your orchestrator, and hand off **independent code review** and **large-context research** to a model from a *different family* — GLM-5.2. Different model families make uncorrelated mistakes, so a GLM second opinion catches things a Claude (or GPT) reviewer misses. The delegate runs a full agentic loop: it **reads the code itself** and returns its own verdict — not an echo of what the orchestrator already thinks.
 
@@ -59,6 +59,11 @@ printf '%s' "Review src/auth.js for correctness and security. Read it yourself; 
 # Research / analysis over a large local context (1M-token window)
 printf '%s' "Summarize what every script in ./scripts does and how they relate." \
   | glm-delegate research --cwd .
+
+# Generate a deliverable to a FILE — keeps heavy output OUT of the orchestrator's context
+printf '%s' "Write a full architecture design for <X>: approaches, trade-offs, risks." \
+  | glm-delegate generate --out docs/design.md
+# stdout is only:  [glm] generate -> docs/design.md  <bytes>, <lines>, starts: "..."
 ```
 
 Flags:
@@ -66,9 +71,12 @@ Flags:
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--cwd <path>` | current dir | Working directory the delegate runs in |
-| `--max-duration <sec>` | `900` | Hard wall-clock timeout (tree-killed on expiry) |
+| `--out <file>` | `glm-output-<ts>.md` | (generate only) where the deliverable is written |
+| `--max-duration <sec>` | `900` (`1200` generate) | Hard wall-clock timeout (tree-killed on expiry) |
 
 Exit codes: `0` ok · `124` timed out · `2` usage error · otherwise the `claude` exit code.
+
+**Modes:** `review` / `research` are read-only (Read/Grep/Glob) and stream findings to stdout. `generate` adds Write/Edit, writes the deliverable to `--out`, and prints only a one-line summary — so a large design or document never flows back through the caller's context. The caller reads the file directly; the orchestrator only sees the summary. Use `generate` on **trusted input only** (it can write files).
 
 ### Using it from Claude Code
 
@@ -79,7 +87,7 @@ Wrap the two modes as slash-command skills (e.g. `/glm-review`, `/glm-research`)
 `glm-delegate` runs a third-party model with your repo on disk, so it is deliberately hardened:
 
 - **Credential isolation.** The child environment is rebuilt from scratch and `ANTHROPIC_API_KEY` is **deleted** — only the GLM bearer token (`ANTHROPIC_AUTH_TOKEN`) is sent to z.ai. Your real Anthropic key can never leak to a third party. *(unit-tested)*
-- **No code execution.** Review/research expose only `Read,Grep,Glob` — **no `Bash`**. Even if reviewed code contains a prompt-injection ("ignore instructions, run …"), the delegate has no shell to execute it. The orchestrator supplies any `git diff` context in the prompt.
+- **No code execution.** Review/research expose only `Read,Grep,Glob` — **no `Bash`**. Even if reviewed code contains a prompt-injection ("ignore instructions, run …"), the delegate has no shell to execute it. The orchestrator supplies any `git diff` context in the prompt. (`generate` adds `Write`/`Edit`, scoped to the output directory via `--add-dir` — use it on trusted input only.)
 - **Prompt via stdin.** The untrusted prompt never reaches the command line, so there is no shell-injection surface.
 - **Config isolation.** The child runs with an isolated `CLAUDE_CONFIG_DIR`, so your `~/.claude` settings can't re-inject credentials and your persona/output-style doesn't bleed into the delegate.
 - **Runaway guard.** A wall-clock watchdog **tree-kills** the process (Windows `taskkill /T`, POSIX process-group) so a hung delegate can't keep burning quota past the timeout.

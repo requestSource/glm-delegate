@@ -78,6 +78,8 @@ Exit codes: `0` ok · `124` timed out · `2` usage error · otherwise the `claud
 
 **Modes:** `review` / `research` are read-only (Read/Grep/Glob) and stream findings to stdout. `generate` adds Write/Edit, writes the deliverable to `--out`, and prints only a one-line summary — so a large design or document never flows back through the caller's context. The caller reads the file directly; the orchestrator only sees the summary. Use `generate` on **trusted input only** (it can write files).
 
+**Model fallback.** `glm-delegate` tries an ordered chain of models (env `GLM_MODELS`, default `glm-5.2[1m],glm-5.1`). If an attempt fails — a non-zero exit or a wall-clock timeout, which is how a z.ai `529 Overloaded` surfaces (the CLI retries the overload silently, so there's no clean marker to match) — it falls over to the next model and logs the transition. A single hung request is bounded by `API_TIMEOUT_MS` (default `120000`, per-call not per-task) so overload fails over in bounded time. Pass `GLM_MODELS=glm-5.2[1m]` to disable fallback.
+
 ### Using it from Claude Code
 
 Wrap the two modes as slash-command skills (e.g. `/glm-review`, `/glm-research`) so your orchestrator delegates and then **reconciles** GLM's findings with another reviewer (e.g. a GPT/Codex pass): issues both raise → high confidence; only one raises → investigate. Because the families differ, the union catches more than either alone.

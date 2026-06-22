@@ -27,6 +27,13 @@ import path from 'node:path';
 const Z_AI_BASE_URL = 'https://api.z.ai/api/anthropic';
 const GLM_BIG_MODEL = 'glm-5.2[1m]';   // 1M context for big-context review/research
 const GLM_SMALL_MODEL = 'glm-4.7';     // haiku-tier (background) — cheaper
+const GLM_FALLBACK_MODEL = 'glm-5.1';  // tried if the primary model fails / is overloaded (529)
+
+// Ordered model fallback chain. `GLM_MODELS` (comma-separated) overrides the default.
+export function getModels() {
+  const raw = process.env.GLM_MODELS || `${GLM_BIG_MODEL},${GLM_FALLBACK_MODEL}`;
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
 
 const MODE_TOOLS = {
   // review/research are read-only (Bash excluded): the delegate reads potentially
@@ -69,16 +76,19 @@ function readGlmKey() {
 }
 
 // SECURITY-CRITICAL, pure (unit-tested): build a clean child env for the GLM child.
-export function buildChildEnv(parentEnv, glmKey, configDir) {
+export function buildChildEnv(parentEnv, glmKey, configDir, bigModel = GLM_BIG_MODEL) {
   const env = { ...parentEnv };
   delete env.ANTHROPIC_API_KEY; // real Anthropic credential must NEVER reach z.ai
   env.ANTHROPIC_BASE_URL = Z_AI_BASE_URL;
   env.ANTHROPIC_AUTH_TOKEN = glmKey;
-  env.ANTHROPIC_DEFAULT_OPUS_MODEL = GLM_BIG_MODEL;
-  env.ANTHROPIC_DEFAULT_SONNET_MODEL = GLM_BIG_MODEL;
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL = bigModel;       // we invoke `--model opus` → maps here
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL = bigModel;
   env.ANTHROPIC_DEFAULT_HAIKU_MODEL = GLM_SMALL_MODEL;
   env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1000000';
-  if (configDir) env.CLAUDE_CONFIG_DIR = configDir; // isolate from user ~/.claude settings
+  // Bound a single hung/overloaded request (per-CALL, not per-task) so overload
+  // surfaces and fails over in bounded time instead of hanging the whole attempt.
+  if (!env.API_TIMEOUT_MS) env.API_TIMEOUT_MS = '120000';
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;  // isolate from user ~/.claude settings
   return env;
 }
 
@@ -159,9 +169,9 @@ function readStdin() {
 }
 
 // --- spawn headless claude-on-GLM; prompt fed via stdin ---
-function runGlm({ mode, cwd, prompt, maxDuration, configDir, extraArgs = [], stream = true }) {
+function runGlm({ mode, cwd, prompt, maxDuration, configDir, extraArgs = [], stream = true, model }) {
   return new Promise((resolve) => {
-    const env = buildChildEnv(process.env, readGlmKey(), configDir);
+    const env = buildChildEnv(process.env, readGlmKey(), configDir, model);
     // All command-line args are simple, space-free literals; the untrusted,
     // space-bearing prompt goes via stdin (so the shell fallback is not an injection vector).
     const cliArgs = ['-p', '--model', 'opus', '--permission-mode', 'bypassPermissions',
@@ -236,7 +246,14 @@ async function main() {
   }
 
   try {
-    const res = await runGlm({ mode: parsed.mode, cwd: parsed.cwd, prompt, maxDuration: parsed.maxDuration, configDir, extraArgs, stream });
+    const models = getModels();
+    let res, usedModel;
+    for (let i = 0; i < models.length; i++) {
+      usedModel = models[i];
+      if (i > 0) process.stderr.write(`[glm] ${models[i - 1]} failed/overloaded -> falling back to ${usedModel}\n`);
+      res = await runGlm({ mode: parsed.mode, cwd: parsed.cwd, prompt, maxDuration: parsed.maxDuration, configDir, extraArgs, stream, model: usedModel });
+      if ((res.code === 0 && !res.killed) || i === models.length - 1) break;
+    }
 
     if (parsed.mode === 'generate') {
       try {
@@ -250,7 +267,7 @@ async function main() {
       }
     }
 
-    process.stderr.write(`\n[glm] mode=${parsed.mode} exit=${res.code} killed=${res.killed || 'no'} ${Math.round(res.elapsedMs / 1000)}s\n`);
+    process.stderr.write(`\n[glm] mode=${parsed.mode} model=${usedModel} exit=${res.code} killed=${res.killed || 'no'} ${Math.round(res.elapsedMs / 1000)}s\n`);
     process.exit(res.killed === 'timeout' ? 124 : res.code);
   } finally {
     if (configDir) { try { fs.rmSync(configDir, { recursive: true, force: true }); } catch {} }

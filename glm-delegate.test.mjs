@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildChildEnv, parseSecretValue, parseArgs } from './glm-delegate.mjs';
+import { buildChildEnv, parseSecretValue, parseArgs, getModels } from './glm-delegate.mjs';
 
 // --- buildChildEnv (security invariant) ---
 test('strips the real Anthropic API key from child env', () => {
@@ -107,4 +107,28 @@ test('parseArgs rejects --out without a value', () => {
 test('parseArgs leaves out=null for review/research', () => {
   assert.equal(parseArgs(['review']).out, null);
   assert.equal(parseArgs(['research']).out, null);
+});
+
+// --- model fallback chain ---
+test('getModels defaults to glm-5.2[1m] then glm-5.1', () => {
+  delete process.env.GLM_MODELS;
+  assert.deepEqual(getModels(), ['glm-5.2[1m]', 'glm-5.1']);
+});
+
+test('getModels honors the GLM_MODELS env override (trimmed, non-empty)', () => {
+  process.env.GLM_MODELS = ' a , b ,c ,';
+  assert.deepEqual(getModels(), ['a', 'b', 'c']);
+  delete process.env.GLM_MODELS;
+});
+
+test('buildChildEnv uses the given model, defaults to glm-5.2[1m]', () => {
+  const fb = buildChildEnv({}, 'k', null, 'glm-5.1');
+  assert.equal(fb.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.1');
+  assert.equal(fb.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.1');
+  assert.equal(buildChildEnv({}, 'k').ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.2[1m]');
+});
+
+test('buildChildEnv sets API_TIMEOUT_MS default but respects a parent override', () => {
+  assert.equal(buildChildEnv({}, 'k').API_TIMEOUT_MS, '120000');
+  assert.equal(buildChildEnv({ API_TIMEOUT_MS: '5000' }, 'k').API_TIMEOUT_MS, '5000');
 });

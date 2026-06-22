@@ -19,7 +19,7 @@
  * (GLM_SECRETS_FILE, default ~/.my/secrets.cfg).
  */
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -257,7 +257,12 @@ async function main() {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// Robust to symlinks (npm link / global bin run this via a symlinked path):
+// compare REAL paths, not raw import.meta.url vs argv[1] (which differ under a symlink).
+let isMain = false;
+try {
+  isMain = !!process.argv[1] && fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(process.argv[1]);
+} catch { /* invoked some other way — treat as not-main */ }
 if (isMain) {
   main().catch(err => { console.error('[glm] Fatal:', err.message); process.exit(1); });
 }
